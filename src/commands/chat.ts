@@ -1,10 +1,28 @@
 import inquirer from "inquirer";
 import { generateAssistantReply, suggestLinuxCommand } from "../ai.js";
-import { loadConfig } from "../config.js";
+import {
+  getEffectiveActiveModel,
+  loadConfig,
+  syncDefaultProviderFromActiveModel
+} from "../config.js";
 import { runCommand } from "../shell.js";
 import type { ChatMessage } from "../types.js";
+import { ui } from "../ui.js";
 
-export async function runChatMode(): Promise<void> {
+const SUPPORTED_CHAT = new Set(["openrouter", "ollama", "ollama-cloud"]);
+
+export async function runChatMode(opts?: { fromMenu?: boolean }): Promise<void> {
+  void opts;
+  const active = getEffectiveActiveModel();
+  if (!active || !SUPPORTED_CHAT.has(active.provider)) {
+    console.log(
+      ui.error(
+        "Nenhum modelo compatível com o chat do Kronos. No menu, escolha OpenRouter ou Ollama e selecione um modelo."
+      )
+    );
+    return;
+  }
+  syncDefaultProviderFromActiveModel();
   const config = loadConfig();
   const provider = config.providers[config.defaultProvider];
   const history: ChatMessage[] = [

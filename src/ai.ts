@@ -8,7 +8,17 @@ interface OpenAIChatResponse {
   }>;
 }
 
-export async function generateAssistantReply(
+interface OllamaChatResponse {
+  message?: {
+    content?: string;
+  };
+}
+
+function buildUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+async function callOpenRouter(
   provider: ProviderConfig,
   messages: ChatMessage[]
 ): Promise<string> {
@@ -19,8 +29,14 @@ export async function generateAssistantReply(
   if (provider.apiKey) {
     headers.Authorization = `Bearer ${provider.apiKey}`;
   }
+  if (provider.siteUrl) {
+    headers["HTTP-Referer"] = provider.siteUrl;
+  }
+  if (provider.appName) {
+    headers["X-OpenRouter-Title"] = provider.appName;
+  }
 
-  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+  const response = await fetch(buildUrl(provider.baseUrl, "/api/v1/chat/completions"), {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -30,18 +46,55 @@ export async function generateAssistantReply(
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Falha na API (${response.status}): ${errorBody}`);
+    throw new Error(`Falha OpenRouter (${response.status}): ${await response.text()}`);
   }
 
   const data = (await response.json()) as OpenAIChatResponse;
   const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new Error("Resposta vazia do OpenRouter.");
+  return content;
+}
 
-  if (!content) {
-    throw new Error("Resposta da IA vazia.");
+async function callOllama(
+  provider: ProviderConfig,
+  messages: ChatMessage[]
+): Promise<string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+
+  if (provider.type === "ollama-cloud" && provider.apiKey) {
+    headers.Authorization = `Bearer ${provider.apiKey}`;
   }
 
+  const response = await fetch(buildUrl(provider.baseUrl, "/api/chat"), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: provider.model,
+      messages,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Falha Ollama (${response.status}): ${await response.text()}`);
+  }
+
+  const data = (await response.json()) as OllamaChatResponse;
+  const content = data.message?.content?.trim();
+  if (!content) throw new Error("Resposta vazia do Ollama.");
   return content;
+}
+
+export async function generateAssistantReply(
+  provider: ProviderConfig,
+  messages: ChatMessage[]
+): Promise<string> {
+  if (provider.type === "openrouter") {
+    return callOpenRouter(provider, messages);
+  }
+  return callOllama(provider, messages);
 }
 
 export async function suggestLinuxCommand(

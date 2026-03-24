@@ -1,9 +1,26 @@
 import inquirer from "inquirer";
 import { suggestLinuxCommand } from "../ai.js";
-import { loadConfig } from "../config.js";
+import {
+  getEffectiveActiveModel,
+  loadConfig,
+  syncDefaultProviderFromActiveModel
+} from "../config.js";
 import { runCommand } from "../shell.js";
+import { ui } from "../ui.js";
+
+const SUPPORTED = new Set(["openrouter", "ollama", "ollama-cloud"]);
 
 export async function runDirectRequest(request: string): Promise<void> {
+  const active = getEffectiveActiveModel();
+  if (!active || !SUPPORTED.has(active.provider)) {
+    console.log(
+      ui.error(
+        "Configure um modelo OpenRouter ou Ollama no menu antes de usar `kronos run`."
+      )
+    );
+    return;
+  }
+  syncDefaultProviderFromActiveModel();
   const config = loadConfig();
   const provider = config.providers[config.defaultProvider];
 

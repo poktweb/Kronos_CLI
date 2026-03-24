@@ -11,6 +11,17 @@ Tambem suporta configuracao de providers de IA:
 - Ollama (local)
 - Ollama Cloud
 
+## Providers e endpoints usados
+
+- `OpenRouter`: `https://openrouter.ai/api/v1/chat/completions`
+- `Ollama local`: `http://localhost:11434/api/chat`
+- `Ollama Cloud`: `https://ollama.com/api/chat` (com `Authorization: Bearer <OLLAMA_API_KEY>`)
+
+No OpenRouter, voce pode configurar tambem os headers opcionais:
+
+- `HTTP-Referer`
+- `X-OpenRouter-Title`
+
 ## Instalar dependencias
 
 ```bash
@@ -70,12 +81,20 @@ npm run dev
 npm run dev -- config
 ```
 
-No comando de configuracao, voce define:
+Fluxo interativo (lista para selecionar provider):
 
-- Base URL
-- Modelo
 - API Key
 - Provider padrao
+
+Tambem aceita acao direta (estilo Pokt_CLI):
+
+```bash
+kronos config show
+kronos config set-openrouter -v <OPENROUTER_API_KEY>
+kronos config set-ollama-cloud -v <OLLAMA_API_KEY>
+kronos config clear-openrouter
+kronos config clear-ollama-cloud
+```
 
 ## Comandos
 
