@@ -1,10 +1,17 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { runChatMode } from "./commands/chat.js";
 import { runConfigureCommand } from "./commands/configure.js";
 import { runDirectRequest } from "./commands/run.js";
 import { loadConfig } from "./config.js";
 import { showMenu } from "./menu.js";
+
+const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+const pkgVersion = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+const cliVersion = pkgVersion.version ?? "0.0.0";
 
 const argv = process.argv.slice(2);
 
@@ -17,7 +24,7 @@ if (argv.length === 0) {
   program
     .name("kronos")
     .description("Kronos CLI - IA para ajudar no terminal Linux")
-    .version("0.1.0");
+    .version(cliVersion);
 
   program
     .command("chat")

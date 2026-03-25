@@ -5,6 +5,7 @@ import {
   loadConfig,
   syncDefaultProviderFromActiveModel
 } from "../config.js";
+import { formatHostSummaryForPrompt, ensureHostContextForActions } from "../host-context.js";
 import { runCommand } from "../shell.js";
 import { ui } from "../ui.js";
 
@@ -25,7 +26,11 @@ export async function runDirectRequest(request: string): Promise<void> {
   const provider = config.providers[config.defaultProvider];
 
   try {
-    const command = await suggestLinuxCommand(provider, request);
+    const host = ensureHostContextForActions();
+    const hostSummary = formatHostSummaryForPrompt(host);
+    console.log(ui.dim(`Ambiente detectado: ${hostSummary}`));
+
+    const command = await suggestLinuxCommand(provider, request, hostSummary);
     console.log(`Comando sugerido: ${command}`);
 
     const { execute } = await inquirer.prompt<{ execute: boolean }>([

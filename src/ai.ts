@@ -99,10 +99,16 @@ export async function generateAssistantReply(
 
 export async function suggestLinuxCommand(
   provider: ProviderConfig,
-  request: string
+  request: string,
+  hostSummary?: string
 ): Promise<string> {
+  const envLine = hostSummary
+    ? ` Ambiente onde o comando será executado: ${hostSummary}. Use sintaxe, caminhos e gerenciador de pacotes adequados a este sistema (não assuma apenas Debian/Ubuntu se for outro).`
+    : "";
+
   const systemPrompt =
-    "Você é o Kronos CLI, especialista em Linux. Gere APENAS um comando shell seguro e direto, sem markdown, sem explicações e sem crases. Se a solicitação for ambígua, retorne um comando de diagnóstico curto.";
+    "Você é o Kronos CLI, especialista em linha de comando (Linux, macOS, Windows shell). Gere APENAS um comando shell seguro e direto, sem markdown, sem explicações e sem crases. Se a solicitação for ambígua, retorne um comando de diagnóstico curto." +
+    envLine;
 
   return generateAssistantReply(provider, [
     { role: "system", content: systemPrompt },

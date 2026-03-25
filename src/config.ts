@@ -14,6 +14,10 @@ export type { MenuProvider } from "./types.js";
 const CONFIG_DIR = path.join(os.homedir(), ".kronos");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
+export function getKronosConfigDir(): string {
+  return CONFIG_DIR;
+}
+
 export const PROVIDER_LABELS: Record<MenuProvider, string> = {
   controller: "Pokt API (Controller)",
   openai: "OpenAI",

@@ -5,6 +5,7 @@ import {
   loadConfig,
   syncDefaultProviderFromActiveModel
 } from "../config.js";
+import { ensureHostContextForActions, formatHostSummaryForPrompt } from "../host-context.js";
 import { runCommand } from "../shell.js";
 import type { ChatMessage } from "../types.js";
 import { ui } from "../ui.js";
@@ -59,7 +60,11 @@ export async function runChatMode(opts?: { fromMenu?: boolean }): Promise<void> 
       }
 
       try {
-        const cmd = await suggestLinuxCommand(provider, commandRequest);
+        const host = ensureHostContextForActions();
+        const hostSummary = formatHostSummaryForPrompt(host);
+        console.log(ui.dim(`Ambiente: ${hostSummary}`));
+
+        const cmd = await suggestLinuxCommand(provider, commandRequest, hostSummary);
         console.log(`Comando sugerido: ${cmd}`);
 
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
