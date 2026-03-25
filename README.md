@@ -46,41 +46,6 @@ kronos
 kronos "instale o npm"
 ```
 
-## Build
-
-```bash
-npm run build
-```
-
-## Validar pacote antes de publicar
-
-```bash
-npm run pack:check
-```
-
-## Publicar no npm
-
-```bash
-npm login
-npm publish --access public
-```
-
-## Uso em desenvolvimento
-
-```bash
-npm run dev -- "instale o npm"
-```
-
-```bash
-npm run dev
-```
-
-## Configurar providers
-
-```bash
-npm run dev -- config
-```
-
 Fluxo interativo (lista para selecionar provider):
 
 - API Key

@@ -160,9 +160,13 @@ export async function runModelsAction(action: string, id?: string): Promise<void
       console.log(ui.dim("Create keys at: https://ollama.com/settings/keys"));
       return;
     }
-    const spinner = ora("Fetching Ollama Cloud models (https://ollama.com/api/tags)...").start();
+    const c = loadConfig();
+    const baseUrl =
+      c.providers["ollama-cloud"].baseUrl.replace(/\/$/, "") || "https://ollama.com";
+    const url = `${baseUrl}/api/tags`;
+    const spinner = ora(`Buscando modelos Ollama Cloud (${url})...`).start();
     try {
-      const response = await fetch("https://ollama.com/api/tags", {
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${apiKey}` }
       });
       if (!response.ok) {

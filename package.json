@@ -1,6 +1,6 @@
 {
   "name": "kronos-cli",
-  "version": "0.0.2",
+  "version": "0.0.5",
   "description": "Kronos CLI - assistente de terminal com IA",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

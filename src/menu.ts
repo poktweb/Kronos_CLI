@@ -12,8 +12,6 @@ import { runModelsAction } from "./menu-models.js";
 import type { RegisteredModel } from "./types.js";
 import { ui } from "./ui.js";
 
-let mainMenuBannerAnimatedThisProcess = false;
-
 export async function showMenu(): Promise<void> {
   const active = getEffectiveActiveModel();
   const providerLabel = active
@@ -21,9 +19,7 @@ export async function showMenu(): Promise<void> {
     : "Nenhum";
 
   console.log("");
-  const animateBanner = !mainMenuBannerAnimatedThisProcess;
-  if (animateBanner) mainMenuBannerAnimatedThisProcess = true;
-  await ui.printBanner({ animate: animateBanner });
+  await ui.printBanner({ animate: false });
   console.log(ui.statusLine(providerLabel, getConfigPath()));
   console.log("");
   console.log(ui.separator());
@@ -34,8 +30,8 @@ export async function showMenu(): Promise<void> {
     name: "action",
     message: "O que deseja fazer?",
     choices: [
-      { title: "🔑 Token (OpenRouter) e URL do Ollama (local)", value: "config" },
-      { title: "🏠 Casa de API (OpenRouter ou Ollama local)", value: "provider" },
+      { title: "🔑 Tokens (OpenRouter, Ollama Cloud) e URL do Ollama (local)", value: "config" },
+      { title: "🏠 Casa de API (OpenRouter, Ollama local ou Cloud)", value: "provider" },
       { title: "🤖 Escolher modelo", value: "models" },
       { title: "❌ Sair", value: "exit" }
     ]
@@ -65,7 +61,8 @@ async function handleModelsMenu(providerFilter?: string): Promise<void> {
   if (!Array.isArray(allModels) || allModels.length === 0) {
     c.registeredModels = [
       { provider: "openrouter", id: c.providers.openrouter.model },
-      { provider: "ollama", id: c.providers.ollama.model }
+      { provider: "ollama", id: c.providers.ollama.model },
+      { provider: "ollama-cloud", id: c.providers["ollama-cloud"].model }
     ];
     saveConfig(c);
     allModels = c.registeredModels;
@@ -78,7 +75,7 @@ async function handleModelsMenu(providerFilter?: string): Promise<void> {
         title: `${active?.provider === p ? "★ " : ""}${PROVIDER_LABELS[p] ?? p}`,
         value: p
       })),
-      { title: "➕ Sincronizar modelos (lista da API)", value: "go-sync" as const },
+      { title: "➕ Sincronizar modelos (API OpenRouter / Ollama / Ollama Cloud)", value: "go-sync" as const },
       { title: "🔙 Voltar", value: "back" as const }
     ];
     const cat = await prompts({
@@ -101,6 +98,12 @@ async function handleModelsMenu(providerFilter?: string): Promise<void> {
   }
   if (providerModels.length === 0 && providerFilter === "ollama") {
     await runModelsAction("fetch-ollama");
+    c = loadConfig();
+    allModels = c.registeredModels ?? [];
+    providerModels = allModels.filter((m) => m.provider === providerFilter);
+  }
+  if (providerModels.length === 0 && providerFilter === "ollama-cloud") {
+    await runModelsAction("fetch-ollama-cloud");
     c = loadConfig();
     allModels = c.registeredModels ?? [];
     providerModels = allModels.filter((m) => m.provider === providerFilter);
@@ -133,7 +136,7 @@ async function handleModelsMenu(providerFilter?: string): Promise<void> {
     c = loadConfig();
     c.activeModel = selected;
     const pt = selected.provider;
-    if (pt === "openrouter" || pt === "ollama") {
+    if (pt === "openrouter" || pt === "ollama" || pt === "ollama-cloud") {
       c.defaultProvider = pt;
       c.providers[pt] = { ...c.providers[pt], model: selected.id };
     }
@@ -150,7 +153,11 @@ async function handleSyncModelsMenu(): Promise<void> {
     message: "Sincronizar modelos de qual fonte?",
     choices: [
       { title: "OpenRouter — buscar lista (API pública)", value: "fetch-openrouter" },
-      { title: "Ollama (local) — listar modelos instalados", value: "fetch-ollama" },
+      { title: "Ollama (local) — GET /api/tags (modelos instalados)", value: "fetch-ollama" },
+      {
+        title: "Ollama Cloud — GET /api/tags (modelos disponíveis na nuvem)",
+        value: "fetch-ollama-cloud"
+      },
       { title: "🔙 Voltar", value: "back" }
     ]
   });
@@ -169,7 +176,8 @@ async function handleConfigMenu(): Promise<void> {
     choices: [
       { title: "Ver config atual (tokens mascarados)", value: "show" },
       { title: "Token OpenRouter", value: "set-openrouter" },
-      { title: "URL base do Ollama (ex: http://localhost:11434)", value: "set-ollama" },
+      { title: "Token Ollama Cloud (ollama.com)", value: "set-ollama-cloud" },
+      { title: "URL base do Ollama local (ex: http://localhost:11434)", value: "set-ollama" },
       { title: "🔙 Voltar", value: "back" }
     ]
   });
@@ -178,9 +186,11 @@ async function handleConfigMenu(): Promise<void> {
   if (response.type === "show") {
     const c = loadConfig();
     const openrouter = c.providers.openrouter.apiKey;
+    const ollamaCloud = c.providers["ollama-cloud"].apiKey;
     const ollama = c.providers.ollama.baseUrl;
     console.log(chalk.blue("\nConfig atual (tokens mascarados):"));
     console.log(ui.dim("  OpenRouter:"), openrouter ? openrouter.slice(0, 8) + "****" : "(não definido)");
+    console.log(ui.dim("  Ollama Cloud:"), ollamaCloud ? ollamaCloud.slice(0, 8) + "****" : "(não definido)");
     console.log(ui.dim("  Ollama (URL):"), ollama || "(não definido)");
     console.log(ui.dim("  Provider padrão:"), c.defaultProvider);
     console.log(ui.warn("\nArquivo em ~/.kronos — não compartilhe.\n"));
@@ -190,7 +200,9 @@ async function handleConfigMenu(): Promise<void> {
   const msg =
     response.type === "set-openrouter"
       ? "Token OpenRouter:"
-      : "URL base do Ollama (sem barra no final):";
+      : response.type === "set-ollama-cloud"
+        ? "Token Ollama Cloud (https://ollama.com/settings/keys):"
+        : "URL base do Ollama local (sem barra no final):";
 
   const valueResponse = await prompts({
     type: "text",
@@ -202,6 +214,8 @@ async function handleConfigMenu(): Promise<void> {
     const c = loadConfig();
     if (response.type === "set-openrouter") {
       c.providers.openrouter.apiKey = String(valueResponse.val).trim();
+    } else if (response.type === "set-ollama-cloud") {
+      c.providers["ollama-cloud"].apiKey = String(valueResponse.val).trim();
     } else if (response.type === "set-ollama") {
       c.providers.ollama.baseUrl = String(valueResponse.val).replace(/\/$/, "");
     }
@@ -238,7 +252,7 @@ async function handleProviderMenu(): Promise<void> {
     const cfg = loadConfig();
     cfg.activeModel = model;
     const pt = model.provider;
-    if (pt === "openrouter" || pt === "ollama") {
+    if (pt === "openrouter" || pt === "ollama" || pt === "ollama-cloud") {
       cfg.defaultProvider = pt;
       cfg.providers[pt] = { ...cfg.providers[pt], model: model.id };
     }
@@ -248,6 +262,12 @@ async function handleProviderMenu(): Promise<void> {
   } else {
     if (response.provider === "openrouter") {
       console.log(ui.error("Nenhum modelo OpenRouter. Use: Escolher modelo → sincronizar OpenRouter."));
+    } else if (response.provider === "ollama-cloud") {
+      console.log(
+        ui.error(
+          "Nenhum modelo Ollama Cloud. Defina o token em Configurações e use Escolher modelo → sincronizar (API)."
+        )
+      );
     } else {
       console.log(
         ui.error(

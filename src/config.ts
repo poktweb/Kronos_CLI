@@ -32,8 +32,12 @@ export const ALL_PROVIDERS: readonly MenuProvider[] = Object.keys(
   PROVIDER_LABELS
 ) as MenuProvider[];
 
-/** Provedores no menu principal: OpenRouter e Ollama local. */
-export const MENU_PROVIDERS: readonly ProviderType[] = ["openrouter", "ollama"];
+/** Provedores no menu principal: OpenRouter, Ollama local e Ollama Cloud. */
+export const MENU_PROVIDERS: readonly ProviderType[] = [
+  "openrouter",
+  "ollama",
+  "ollama-cloud"
+];
 
 const defaultConfig: KronosConfig = {
   defaultProvider: "openrouter",
@@ -58,7 +62,7 @@ const defaultConfig: KronosConfig = {
       type: "ollama-cloud",
       name: "Ollama Cloud",
       baseUrl: "https://ollama.com",
-      model: "gpt-oss:120b",
+      model: "glm-5:cloud",
       apiKey: ""
     }
   }
@@ -73,7 +77,8 @@ function ensureConfigDir() {
 function defaultRegisteredModels(c: KronosConfig): RegisteredModel[] {
   return [
     { provider: "openrouter", id: c.providers.openrouter.model },
-    { provider: "ollama", id: c.providers.ollama.model }
+    { provider: "ollama", id: c.providers.ollama.model },
+    { provider: "ollama-cloud", id: c.providers["ollama-cloud"].model }
   ];
 }
 
@@ -181,16 +186,39 @@ export function getProPurchaseUrl(): string {
   return getTokenPurchaseUrl();
 }
 
+/** Atualiza modelo ativo no disco quando o fallback da IA escolhe outro modelo. */
+export function persistActiveModelIfChanged(provider: ProviderType, modelId: string): void {
+  const c = loadConfig();
+  const prov = c.providers[provider];
+  const same =
+    c.activeModel?.provider === provider &&
+    c.activeModel?.id === modelId &&
+    c.defaultProvider === provider &&
+    prov.model === modelId;
+  if (same) return;
+  c.activeModel = { provider, id: modelId };
+  c.defaultProvider = provider;
+  c.providers[provider] = { ...prov, model: modelId };
+  saveConfig(c);
+}
+
 /** Sincroniza defaultProvider + model do provider quando o modelo ativo é suportado pelo runtime do Kronos. */
 export function syncDefaultProviderFromActiveModel(): void {
   const m = getEffectiveActiveModel();
   if (!m) return;
   const pt = m.provider;
-  if (pt === "openrouter" || pt === "ollama" || pt === "ollama-cloud") {
-    const c = loadConfig();
-    c.defaultProvider = pt;
-    c.providers[pt] = { ...c.providers[pt], model: m.id };
-    c.activeModel = m;
-    saveConfig(c);
-  }
+  if (pt !== "openrouter" && pt !== "ollama" && pt !== "ollama-cloud") return;
+
+  const c = loadConfig();
+  const prov = c.providers[pt];
+  const sameDefault = c.defaultProvider === pt;
+  const sameModel = prov.model === m.id;
+  const sameActive =
+    c.activeModel?.provider === m.provider && c.activeModel?.id === m.id;
+  if (sameDefault && sameModel && sameActive) return;
+
+  c.defaultProvider = pt;
+  c.providers[pt] = { ...prov, model: m.id };
+  c.activeModel = m;
+  saveConfig(c);
 }

@@ -1,4 +1,7 @@
-import type { ChatMessage, ProviderConfig } from "./types.js";
+import { persistActiveModelIfChanged } from "./config.js";
+import type { ChatMessage, KronosConfig, ProviderConfig, ProviderType } from "./types.js";
+
+const RUNTIME_PROVIDERS: readonly ProviderType[] = ["openrouter", "ollama", "ollama-cloud"];
 
 interface OpenAIChatResponse {
   choices?: Array<{
@@ -97,6 +100,174 @@ export async function generateAssistantReply(
   return callOllama(provider, messages);
 }
 
+function providerConfigForModel(
+  config: KronosConfig,
+  provider: ProviderType,
+  modelId: string
+): ProviderConfig | null {
+  const base = config.providers[provider];
+  if (!base) return null;
+  return { ...base, model: modelId };
+}
+
+/** Ordem: modelo ativo, depois demais entradas de `registeredModels` (sem duplicar). */
+function buildModelFallbackQueue(config: KronosConfig): Array<{
+  provider: ProviderType;
+  modelId: string;
+}> {
+  const out: Array<{ provider: ProviderType; modelId: string }> = [];
+  const seen = new Set<string>();
+  const add = (p: string, id: string) => {
+    if (!RUNTIME_PROVIDERS.includes(p as ProviderType)) return;
+    const key = `${p}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ provider: p as ProviderType, modelId: id });
+  };
+
+  if (
+    config.activeModel &&
+    RUNTIME_PROVIDERS.includes(config.activeModel.provider as ProviderType)
+  ) {
+    add(config.activeModel.provider, config.activeModel.id);
+  } else {
+    const dp = config.defaultProvider;
+    add(dp, config.providers[dp].model);
+  }
+
+  for (const m of config.registeredModels ?? []) {
+    add(m.provider, m.id);
+  }
+
+  return out;
+}
+
+/** Evita tratar uma linha de comando shell como “recusa” do modelo. */
+function looksLikeShellCommandLine(text: string): boolean {
+  const t = text.trim();
+  const first = t.split(/\r?\n/)[0]?.trim() ?? "";
+  if (!first || t.length > 4096) return false;
+  if (/\b(sorry|cannot|can't|não\s+posso|desculpe)\b/i.test(first) && first.length > 40) {
+    return false;
+  }
+  if (
+    /^(?:sudo\s+)?(?:\/|\.\/|\.\.\/|[a-zA-Z_][\w.-]*)(\s|[/\\]|$)/.test(first) &&
+    first.length < 2000 &&
+    !/^[A-Za-z\s,.'’`]+[.!?]$/.test(first)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Detecta respostas em que o modelo declara não poder ajudar (política, recusa genérica, etc.).
+ * Inglês e português; ignora texto que pareça um comando shell.
+ */
+export function isModelRefusalResponse(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (looksLikeShellCommandLine(t)) return false;
+  const lower = t.toLowerCase();
+  const patterns: RegExp[] = [
+    /i['']?m\s+sorry[,\s]+but\s+i\s+(can['']?t|cannot)\s+(help|assist)/i,
+    /sorry[,\s]+but\s+i\s+(can['']?t|cannot)\s+(help|assist)/i,
+    /i['']?m\s+sorry[,\s]+i\s+(can['']?t|cannot)\s+help/i,
+    /i\s+(can['']?t|cannot)\s+help\s+with\s+(that|this)/i,
+    /i\s+cannot\s+(assist|help)\s+with/i,
+    /i['']?m\s+not\s+able\s+to\s+help/i,
+    /i['']?m\s+unable\s+to\s+(help|assist)/i,
+    /as\s+an\s+ai\s+(language\s+)?model,?\s+i\s+(can['']?t|cannot|must\s+not)/i,
+    /cannot\s+comply\s+with\s+that\s+request/i,
+    /this\s+request\s+(can['']?t|cannot)\s+be\s+completed/i,
+    /não\s+posso\s+ajudar/i,
+    /não\s+consigo\s+ajudar/i,
+    /não\s+posso\s+(fornecer|atender|cumpr)/i,
+    /desculpe,?\s+mas\s+não\s+posso/i,
+    /against\s+(my\s+)?(content\s+)?policy/i,
+    /violat(es|ing)\s+(my\s+)?(?:ethical|usage|safety)\s+guidelines/i
+  ];
+  return patterns.some((p) => p.test(lower) || p.test(t));
+}
+
+export async function generateAssistantReplyWithFallback(
+  config: KronosConfig,
+  messages: ChatMessage[],
+  opts?: {
+    onModelSwitch?: (from: string, to: string) => void;
+    persistOnSuccess?: boolean;
+  }
+): Promise<{ reply: string; usedProvider: ProviderType; usedModel: string }> {
+  const queue = buildModelFallbackQueue(config);
+  if (queue.length === 0) {
+    throw new Error("Nenhum modelo configurado para tentar.");
+  }
+
+  let lastRefusal: { text: string; provider: ProviderType; modelId: string } | null = null;
+  let lastError: unknown;
+  let prevLabel: string | null = null;
+
+  for (const { provider, modelId } of queue) {
+    const pc = providerConfigForModel(config, provider, modelId);
+    if (!pc) continue;
+    const label = `${provider}/${modelId}`;
+    if (prevLabel !== null) {
+      opts?.onModelSwitch?.(prevLabel, label);
+    }
+    prevLabel = label;
+
+    try {
+      const content = await generateAssistantReply(pc, messages);
+      if (!isModelRefusalResponse(content)) {
+        if (opts?.persistOnSuccess !== false) {
+          persistActiveModelIfChanged(provider, modelId);
+        }
+        return { reply: content, usedProvider: provider, usedModel: modelId };
+      }
+      lastRefusal = { text: content, provider, modelId };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastRefusal) {
+    return {
+      reply: lastRefusal.text,
+      usedProvider: lastRefusal.provider,
+      usedModel: lastRefusal.modelId
+    };
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Nenhum modelo respondeu.");
+}
+
+export async function suggestLinuxCommandWithFallback(
+  config: KronosConfig,
+  request: string,
+  hostSummary?: string,
+  opts?: { onModelSwitch?: (from: string, to: string) => void }
+): Promise<string> {
+  const envLine = hostSummary
+    ? ` Ambiente onde o comando será executado: ${hostSummary}. Use sintaxe, caminhos e gerenciador de pacotes adequados a este sistema (não assuma apenas Debian/Ubuntu se for outro).`
+    : "";
+
+  const systemPrompt =
+    "Você é o Kronos CLI, especialista em linha de comando (Linux, macOS, Windows shell). Gere APENAS um comando shell seguro e direto, sem markdown, sem explicações e sem crases. Se a solicitação for ambígua, retorne um comando de diagnóstico curto." +
+    envLine;
+
+  const { reply } = await generateAssistantReplyWithFallback(
+    config,
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: request }
+    ],
+    opts
+  );
+  return reply;
+}
+
 export async function suggestLinuxCommand(
   provider: ProviderConfig,
   request: string,
@@ -148,7 +319,7 @@ function parseNeedsShellJson(raw: string): boolean | null {
  * Classifica se o usuário pede execução real de comando/ferramenta no sistema local.
  */
 export async function detectShellExecutionIntent(
-  provider: ProviderConfig,
+  config: KronosConfig,
   userMessage: string,
   hostSummary?: string
 ): Promise<boolean> {
@@ -159,7 +330,7 @@ export async function detectShellExecutionIntent(
     "Responda APENAS JSON válido, uma linha: {\"needs_shell\":true} ou {\"needs_shell\":false}." +
     envLine;
 
-  const raw = await generateAssistantReply(provider, [
+  const { reply: raw } = await generateAssistantReplyWithFallback(config, [
     { role: "system", content: systemPrompt },
     { role: "user", content: userMessage }
   ]);

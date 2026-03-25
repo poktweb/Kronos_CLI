@@ -52,10 +52,11 @@ export function runCommand(command: string): Promise<number> {
  */
 export function runCommandCapture(
   command: string,
-  opts?: { maxBytes?: number; timeoutMs?: number }
+  opts?: { maxBytes?: number; timeoutMs?: number; mirror?: boolean }
 ): Promise<RunCommandCaptureResult> {
   const maxBytes = opts?.maxBytes ?? DEFAULT_CAPTURE_MAX_BYTES;
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
+  const mirror = opts?.mirror === true;
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, {
@@ -66,8 +67,14 @@ export function runCommandCapture(
     const outAcc = { buf: Buffer.alloc(0), len: 0 };
     const errAcc = { buf: Buffer.alloc(0), len: 0 };
 
-    child.stdout?.on("data", (chunk: Buffer) => appendCapped(outAcc, chunk, maxBytes));
-    child.stderr?.on("data", (chunk: Buffer) => appendCapped(errAcc, chunk, maxBytes));
+    child.stdout?.on("data", (chunk: Buffer) => {
+      appendCapped(outAcc, chunk, maxBytes);
+      if (mirror) process.stdout.write(chunk);
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      appendCapped(errAcc, chunk, maxBytes);
+      if (mirror) process.stderr.write(chunk);
+    });
 
     let timedOut = false;
     const timer = setTimeout(() => {
